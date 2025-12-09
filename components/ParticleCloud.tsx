@@ -49,19 +49,22 @@ const ParticleCloud: React.FC<Props> = ({ data, audioData, isPaused }) => {
         y = r * Math.sin(phi) * Math.sin(theta);
         z = r * Math.cos(phi);
       } else if (data.shape === 'cone') {
-        // Spiral Tree
+        // Tree Shape (Standard Cone)
         const height = 20;
         const baseRadius = 8;
         const hRatio = Math.pow(Math.random(), 0.8); 
         const h = hRatio * height; 
         const rMax = baseRadius * (1 - h / height);
-        const spiralAngle = h * 5 + Math.random() * Math.PI * 2;
+        
+        // Removed spiral offset (h * 5) for standard distribution
+        const angle = Math.random() * Math.PI * 2;
+        
         const r = Math.random() * rMax;
         const droop = r * 0.2;
         
-        x = r * Math.cos(spiralAngle);
+        x = r * Math.cos(angle);
         y = h - 10 - droop; 
-        z = r * Math.sin(spiralAngle);
+        z = r * Math.sin(angle);
 
       } else if (data.shape === 'grid') {
         // STEEP MOUNTAINS
@@ -190,9 +193,12 @@ const ParticleCloud: React.FC<Props> = ({ data, audioData, isPaused }) => {
          const peakFactor = Math.abs(iy + 10) / 10; 
          py = iy + (bassFactor * peakFactor * 2);
       } else if (data.shape === 'cone') {
-         const swayAmount = (iy + 10) * 0.02; 
-         px = ix + Math.sin(time + iy) * swayAmount * noiseAmp;
-         pz = iz + Math.cos(time * 0.8 + iy) * swayAmount * noiseAmp;
+         // Removed spiral/sway animation for natural stable tree look
+         if (data.audioReactive && audioData.bass > 0.1) {
+             const pulse = 1 + audioData.bass * 0.01;
+             px = ix * pulse;
+             pz = iz * pulse;
+         }
       } else {
          // Cloud/Cube
          px = ix + Math.sin(time * moveSpeed + rndX * 10) * noiseAmp;

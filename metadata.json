@@ -1,5 +1,5 @@
 {
-  "name": "Nebula 3D Particle Engine",
+  "name": "Nebula Engine",
   "description": "A high-performance interactive 3D particle system with audio reactivity, layer management, and 3D album capabilities.",
   "requestFramePermissions": [
     "microphone",
