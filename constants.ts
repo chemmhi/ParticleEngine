@@ -74,16 +74,7 @@ export const DEFAULT_ALBUM_LAYER: Omit<AlbumLayerData, 'id'> = {
   position: [0, 0, 0],
   rotation: [0, 0, 0],
   scale: 1,
-  images: [
-    'https://placehold.co/400x400/png?text=1',
-    'https://placehold.co/400x400/png?text=2',
-    'https://placehold.co/400x400/png?text=3',
-    'https://placehold.co/400x400/png?text=4',
-    'https://placehold.co/400x400/png?text=5',
-    'https://placehold.co/400x400/png?text=6',
-    'https://placehold.co/400x400/png?text=7',
-    'https://placehold.co/400x400/png?text=8',
-  ],
+  images: [], // Removed default image URLs
   layout: 'spiral',
   spacing: 1.5,
   frameConfig: {

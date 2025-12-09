@@ -15,7 +15,7 @@ import AlbumLayer from './components/AlbumLayer';
 import ImageParticleLayer from './components/ImageParticleLayer';
 import TextParticleLayer from './components/TextParticleLayer';
 import GestureOverlay from './components/GestureOverlay';
-import { X, ZoomOut } from 'lucide-react';
+import { ZoomOut } from 'lucide-react';
 
 interface FocusTarget {
   position: THREE.Vector3;
@@ -27,7 +27,6 @@ interface FocusTarget {
 const CameraRig: React.FC<{ focusTarget: FocusTarget | null }> = ({ focusTarget }) => {
     const { camera, controls } = useThree();
     
-    // Store previous camera state to restore later
     const stateRef = useRef<{
         saved: boolean;
         position: THREE.Vector3;
@@ -41,10 +40,9 @@ const CameraRig: React.FC<{ focusTarget: FocusTarget | null }> = ({ focusTarget 
     });
 
     useFrame((state, delta) => {
-        const step = 4 * delta; // Animation speed
+        const step = 4 * delta; 
 
         if (focusTarget) {
-            // 1. Save initial state before moving
             if (!stateRef.current.saved) {
                 stateRef.current.position.copy(camera.position);
                 stateRef.current.quaternion.copy(camera.quaternion);
@@ -53,40 +51,27 @@ const CameraRig: React.FC<{ focusTarget: FocusTarget | null }> = ({ focusTarget 
                 if (controls) (controls as any).enabled = false;
             }
 
-            // 2. Calculate ideal distance to fit height
-            // Distance = (ImageHeight / 2) / tan(FOV / 2)
-            // Add slight margin (1.2x)
             const pCamera = camera as THREE.PerspectiveCamera;
             const fovRad = THREE.MathUtils.degToRad(pCamera.fov);
             const distance = (focusTarget.height / 2) / Math.tan(fovRad / 2) * 1.3;
 
-            // 3. Determine target position
-            // The image faces +Z relative to its rotation. We want to be in front of it.
-            // normal vector = (0,0,1) rotated by image's quaternion
             const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(focusTarget.rotation);
             const targetPos = focusTarget.position.clone().add(normal.multiplyScalar(distance));
 
-            // 4. Animate Position
             camera.position.lerp(targetPos, step);
             
-            // 5. Animate Rotation (Look at image flatly)
-            // We want the camera to look opposite to the normal
             const lookAtMatrix = new THREE.Matrix4().lookAt(camera.position, focusTarget.position, new THREE.Vector3(0, 1, 0));
             const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookAtMatrix);
             camera.quaternion.slerp(targetQuat, step);
             
-            // Keep controls target on the object so if user could rotate, it spins around object
             if (controls) (controls as any).target.lerp(focusTarget.position, step);
 
         } else {
-            // Restore Phase
             if (stateRef.current.saved) {
-                // Lerp back to original state
                 camera.position.lerp(stateRef.current.position, step);
                 camera.quaternion.slerp(stateRef.current.quaternion, step);
                 if (controls) (controls as any).target.lerp(stateRef.current.target, step);
 
-                // Check if restoration is complete (close enough)
                 if (camera.position.distanceTo(stateRef.current.position) < 0.1) {
                     stateRef.current.saved = false;
                     if (controls) (controls as any).enabled = true;
@@ -97,9 +82,74 @@ const CameraRig: React.FC<{ focusTarget: FocusTarget | null }> = ({ focusTarget 
     return null;
 }
 
+// Center Raycaster for "Grab" Gesture - Modified to find image most facing the camera
+const CenterRaycaster: React.FC<{ trigger: number, onHit: (obj: any) => void }> = ({ trigger, onHit }) => {
+    const { camera, scene } = useThree();
+    const lastTriggerRef = useRef(0);
+
+    useFrame(() => {
+        if (trigger === lastTriggerRef.current) return;
+        lastTriggerRef.current = trigger;
+
+        const candidates: { alignment: number, dist: number, obj: THREE.Object3D }[] = [];
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir); // Vector pointing where camera looks
+
+        scene.traverse((obj) => {
+            if (obj.userData?.isInteractable) {
+                const pos = new THREE.Vector3();
+                obj.getWorldPosition(pos);
+                
+                // Project to NDC to check visibility
+                const ndcPos = pos.clone().project(camera);
+                
+                // Check if roughly on screen (-1 to 1) and in front
+                // Relaxed X/Y threshold to 0.8 to capture items slightly off center
+                if (Math.abs(ndcPos.z) < 1 && Math.abs(ndcPos.x) < 0.8 && Math.abs(ndcPos.y) < 0.8) {
+                    
+                    const objNormal = new THREE.Vector3(0, 0, 1);
+                    objNormal.applyQuaternion(obj.getWorldQuaternion(new THREE.Quaternion()));
+
+                    // Dot product of View Dir and Object Normal
+                    // -1 means they are perfectly facing each other (Camera looking at Front of image)
+                    // 1 means looking at back
+                    const alignment = camDir.dot(objNormal);
+                    
+                    // Filter out objects facing away or perpendicular (alignment > 0 means seeing back or side)
+                    // Accepting slight angles (0.2 threshold)
+                    if (alignment < 0.2) { 
+                        candidates.push({ 
+                            alignment, 
+                            dist: pos.distanceTo(camera.position),
+                            obj 
+                        });
+                    }
+                }
+            }
+        });
+
+        // Sort by Alignment (Lowest is best, i.e., closest to -1)
+        // Secondary sort by distance if alignment is very similar
+        candidates.sort((a, b) => {
+            if (Math.abs(a.alignment - b.alignment) < 0.1) {
+                return a.dist - b.dist;
+            }
+            return a.alignment - b.alignment;
+        });
+
+        if (candidates.length > 0) {
+             const best = candidates[0];
+             onHit({
+                 ...best.obj.userData,
+                 object: best.obj
+             });
+        }
+    });
+    return null;
+}
+
 const App: React.FC = () => {
   // --- State ---
-  // Initialize with a locked base layer
   const [layers, setLayers] = useState<LayerData[]>([
     { ...DEFAULT_PARTICLE_LAYER, id: uuidv4(), name: 'Base Layer', locked: true } as LayerData,
   ]);
@@ -110,6 +160,9 @@ const App: React.FC = () => {
   const [audioData, setAudioData] = useState<AudioData>({ frequency: new Uint8Array(), bass: 0, mid: 0, treble: 0 });
   const [focusTarget, setFocusTarget] = useState<FocusTarget | null>(null);
   
+  // Gesture State
+  const [grabSignal, setGrabSignal] = useState(0); 
+
   const orbitRef = useRef<any>(null);
   const isPaused = focusTarget !== null;
 
@@ -138,7 +191,7 @@ const App: React.FC = () => {
 
   const handleDeleteLayer = (id: string) => {
     const layer = layers.find(l => l.id === id);
-    if (layer?.locked) return; // Prevent deletion of locked layers
+    if (layer?.locked) return;
 
     setLayers(prev => prev.filter(l => l.id !== id));
     if (selectedLayerId === id) setSelectedLayerId(null);
@@ -165,18 +218,13 @@ const App: React.FC = () => {
   const handleLoadPreset = (presetId: string) => {
       const preset = SCENE_PRESETS.find(p => p.id === presetId);
       if (preset) {
-          // Do NOT reset scene settings. Decouple models from scene.
-          // setSceneSettings(preset.settings); 
-          
           const newLayers = preset.layers.map((l) => ({ 
               ...l, 
               id: uuidv4(),
-              locked: false // Imported models should not be locked
+              locked: false
           } as LayerData));
           
-          // Append new layers to existing ones
           setLayers(prev => [...prev, ...newLayers]);
-          
           if (newLayers.length > 0) setSelectedLayerId(newLayers[0].id);
       }
   };
@@ -203,19 +251,81 @@ const App: React.FC = () => {
       }
   };
 
-  const handleGesture = (gesture: string) => {
-    if (!selectedLayerId) return;
-    const layer = layers.find(l => l.id === selectedLayerId);
-    if (!layer) return;
+  const handleObjectHit = (data: any) => {
+      if (data.type === 'album-image') {
+          const targetObj = data.object;
+          const targetPos = new THREE.Vector3();
+          const targetQuat = new THREE.Quaternion();
+          targetObj.getWorldPosition(targetPos);
+          targetObj.getWorldQuaternion(targetQuat);
+          
+          setFocusTarget({
+              position: targetPos,
+              rotation: targetQuat,
+              width: data.width,
+              height: data.height
+          });
+      }
+  };
 
-    if (gesture === 'Swipe Left' || gesture === '左滑 (Swipe Left)') {
-        handleUpdateLayer(layer.id, { position: [layer.position[0] - 5, layer.position[1], layer.position[2]] });
-    } else if (gesture === 'Swipe Right' || gesture === '右滑 (Swipe Right)') {
-        handleUpdateLayer(layer.id, { position: [layer.position[0] + 5, layer.position[1], layer.position[2]] });
-    } else if (gesture === 'Open Palm (Reset)' || gesture === '张开手掌 (Open Palm)') {
-        handleUpdateLayer(layer.id, { position: [0, 0, 0], rotation: [0, 0, 0] });
-    } else if (gesture === 'Fist (Pause)' || gesture === '握拳 (Fist)') {
-        handleUpdateLayer(layer.id, { visible: !layer.visible });
+  // --- STRICT GESTURE HANDLING ---
+  const handleGesture = (gesture: string, data?: any) => {
+    if (!orbitRef.current) return;
+
+    // 1. ROTATE (Index + Middle Fingers)
+    if (gesture === 'Rotate' && data && !focusTarget) {
+        // Boosted sensitivity from 3.0 to 20.0 for faster response
+        const SENSITIVITY = 20.0;
+        const currentAzimuth = orbitRef.current.getAzimuthalAngle();
+        orbitRef.current.setAzimuthalAngle(currentAzimuth - (data.dx * SENSITIVITY));
+        
+        const currentPolar = orbitRef.current.getPolarAngle();
+        // FIXED: Inverted direction for Polar (Up/Down) to match hand movement
+        const newPolar = Math.max(0.1, Math.min(Math.PI - 0.1, currentPolar - (data.dy * SENSITIVITY)));
+        orbitRef.current.setPolarAngle(newPolar);
+        orbitRef.current.update();
+    }
+    
+    // 2. CONTINUOUS ZOOM IN (Spread)
+    else if (gesture === 'ZoomIn') {
+        const ZOOM_STEP = 1.0; 
+        const controls = orbitRef.current;
+        const camera = controls.object as THREE.Camera;
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        
+        // Move closer
+        const nextPos = camera.position.clone().add(forward.multiplyScalar(ZOOM_STEP));
+        if (nextPos.length() > 5) { // Min distance limit
+            camera.position.add(forward.multiplyScalar(ZOOM_STEP));
+            controls.target.add(forward.multiplyScalar(ZOOM_STEP));
+            controls.update();
+        }
+    }
+
+    // 3. CONTINUOUS ZOOM OUT (Pinch)
+    else if (gesture === 'ZoomOut') {
+        const ZOOM_STEP = 1.0; 
+        const controls = orbitRef.current;
+        const camera = controls.object as THREE.Camera;
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        
+        // Move away (subtract forward vector)
+        const nextPos = camera.position.clone().sub(forward.multiplyScalar(ZOOM_STEP));
+        if (nextPos.length() < 100) { // Max distance limit
+            camera.position.sub(forward.multiplyScalar(ZOOM_STEP));
+            controls.target.sub(forward.multiplyScalar(ZOOM_STEP));
+            controls.update();
+        }
+    }
+
+    // 4. GRAB (Fist) -> Preview
+    else if (gesture === 'Grab') {
+        setGrabSignal(s => s + 1); // Trigger CenterRaycaster
+    }
+
+    // 5. RELEASE (Open Palm) -> Cancel Preview
+    else if (gesture === 'Release') {
+        setFocusTarget(null);
     }
   };
 
@@ -250,21 +360,22 @@ const App: React.FC = () => {
         onLoadPreset={handleLoadPreset}
       />
 
-      <GestureOverlay onGesture={handleGesture} />
-
+      <GestureOverlay onGesture={handleGesture} isInPreview={focusTarget !== null} />
+      
       {focusTarget && (
-          <div className="absolute top-4 right-4 z-50 animate-in fade-in duration-300">
+          <div className="absolute top-4 right-4 z-40 animate-in fade-in duration-300">
               <button 
                 onClick={() => setFocusTarget(null)}
                 className="bg-slate-800/80 backdrop-blur hover:bg-red-500/80 text-white px-4 py-2 rounded-full border border-slate-600 flex items-center gap-2 shadow-xl transition-all"
               >
                   <ZoomOut size={18} />
-                  <span className="text-sm font-medium">退出预览</span>
+                  <span className="text-sm font-medium">张开手掌以退出预览</span>
               </button>
           </div>
       )}
 
-      <div className="w-full h-full pl-80"> 
+      {/* Main Canvas Container - Removed padding so it fills screen */}
+      <div className="w-full h-full absolute inset-0 z-0"> 
         <Canvas camera={{ position: [0, 0, 30], fov: 60 }} gl={{ antialias: true, toneMappingExposure: 1.2 }}>
             <color attach="background" args={[sceneSettings.backgroundColor]} />
             <fog attach="fog" args={[sceneSettings.fogColor, sceneSettings.fogDensity, 100]} />
@@ -275,6 +386,7 @@ const App: React.FC = () => {
                 <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
                 
                 <CameraRig focusTarget={focusTarget} />
+                <CenterRaycaster trigger={grabSignal} onHit={handleObjectHit} />
 
                 <group>
                   {layers.map(layer => {
@@ -303,8 +415,8 @@ const App: React.FC = () => {
                   dampingFactor={0.05} 
                   minDistance={2} 
                   maxDistance={100}
-                  enablePan={true}
-                  panSpeed={1}
+                  enablePan={false}
+                  enableZoom={true}
                 />
             </Suspense>
         </Canvas>

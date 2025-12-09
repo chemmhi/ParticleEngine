@@ -11,13 +11,8 @@ interface Props {
   isPaused?: boolean;
 }
 
-const PhotoMesh: React.FC<{ url: string; width: number; height: number; opacity: number }> = ({ url, width, height, opacity }) => {
-    // We use TextureLoader to get a real texture that reacts to light via MeshStandardMaterial
-    // This gives it perspective and depth compared to the flat <Image> component
+const PhotoMesh: React.FC<{ url: string; width: number; height: number; opacity: number; hovered: boolean }> = ({ url, width, height, opacity, hovered }) => {
     const texture = useLoader(THREE.TextureLoader, url);
-    
-    // Ensure texture maintains aspect ratio or centering if needed, but for now we stretch to frame
-    // Setting anisotropy improves texture quality at angles
     texture.anisotropy = 16;
     texture.colorSpace = THREE.SRGBColorSpace;
 
@@ -31,6 +26,7 @@ const PhotoMesh: React.FC<{ url: string; width: number; height: number; opacity:
                 side={THREE.DoubleSide} 
                 roughness={0.4}
                 metalness={0.1}
+                emissive={hovered ? '#444444' : '#000000'} // Highlight effect
             />
         </mesh>
     );
@@ -39,34 +35,22 @@ const PhotoMesh: React.FC<{ url: string; width: number; height: number; opacity:
 const FrameMesh: React.FC<{ data: AlbumLayerData; width: number; height: number }> = ({ data, width, height }) => {
   const { style, color, borderWidth, padding, radius, shadow } = data.frameConfig;
 
-  // Calculate total frame size
   const frameW = width + (padding * 2) + (borderWidth * 2);
   const frameH = height + (padding * 2) + (borderWidth * 2);
-  const frameD = 0.1; // Frame thickness
+  const frameD = 0.1;
 
   if (style === 'none') return null;
 
   let material = <meshStandardMaterial color={color} roughness={0.5} />;
-
-  if (style === 'wood') {
-    material = <meshStandardMaterial color="#8b5a2b" roughness={0.9} />;
-  } else if (style === 'metal') {
-    // Determine metal color based on custom color or defaults
-    const isDefaultColor = color === '#ffffff';
-    const metalColor = isDefaultColor ? '#C0C0C0' : color; // Default to Silver if white
-    material = <meshStandardMaterial color={metalColor} metalness={0.9} roughness={0.2} />;
-  } else if (style === 'minimal') {
-     material = <meshStandardMaterial color={color} roughness={0.2} />;
-  }
+  if (style === 'wood') material = <meshStandardMaterial color="#8b5a2b" roughness={0.9} />;
+  else if (style === 'metal') material = <meshStandardMaterial color={color === '#ffffff' ? '#C0C0C0' : color} metalness={0.9} roughness={0.2} />;
+  else if (style === 'minimal') material = <meshStandardMaterial color={color} roughness={0.2} />;
 
   return (
     <group position={[0, 0, -0.06]}> 
-      {/* Main Frame Body */}
       <RoundedBox args={[frameW, frameH, frameD]} radius={radius} smoothness={4}>
         {material}
       </RoundedBox>
-
-      {/* Drop Shadow Simulation */}
       {shadow && (
         <mesh position={[0.1, -0.1, -0.1]}>
            <planeGeometry args={[frameW, frameH]} />
@@ -81,11 +65,9 @@ const AlbumLayer: React.FC<Props> = ({ data, onImageClick, isPaused }) => {
   const groupRef = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState<number | null>(null);
 
-  // Image Dimensions
   const imgW = 3;
   const imgH = 2;
 
-  // Pre-calculate positions to ensure stability
   const items = useMemo(() => {
     return data.images.map((imgUrl, i) => {
         let x = 0, y = 0, z = 0;
@@ -111,24 +93,17 @@ const AlbumLayer: React.FC<Props> = ({ data, onImageClick, isPaused }) => {
           x = r * Math.cos(theta) * Math.sin(phi);
           y = r * Math.sin(theta) * Math.sin(phi);
           z = r * Math.cos(phi);
-          
-          // Look at center
           rotY = Math.atan2(x, z);
           rotX = -Math.atan2(y, Math.sqrt(x * x + z * z));
         } else if (data.layout === 'random') {
-           // seeded random-like stability using index
            const pseudoRandom = (seed: number) => {
                 const x = Math.sin(seed) * 10000;
                 return x - Math.floor(x);
            };
-           // SIGNIFICANTLY INCREASED SPREAD for wider distribution
            const spread = data.spacing * 40; 
-           
            x = (pseudoRandom(i * 13) - 0.5) * spread;
            y = (pseudoRandom(i * 29) - 0.5) * spread;
            z = (pseudoRandom(i * 47) - 0.5) * spread;
-           
-           // Look at center (0,0,0)
            rotY = Math.atan2(x, z);
            rotX = -Math.atan2(y, Math.sqrt(x * x + z * z));
         }
@@ -139,8 +114,6 @@ const AlbumLayer: React.FC<Props> = ({ data, onImageClick, isPaused }) => {
 
   useFrame((state) => {
     if (isPaused || !groupRef.current) return;
-    
-    // Slow float
     if (data.layout !== 'grid') {
         groupRef.current.rotation.y += 0.002;
     }
@@ -175,13 +148,19 @@ const AlbumLayer: React.FC<Props> = ({ data, onImageClick, isPaused }) => {
               e.eventObject.getWorldQuaternion(quat);
               onImageClick?.(item.imgUrl, target, quat, imgW, imgH);
             }}
+            // IMPORTANT: Add userData for the App's gesture raycaster to find this
+            userData={{
+                isInteractable: true,
+                type: 'album-image',
+                index: i,
+                url: item.imgUrl,
+                width: imgW,
+                height: imgH
+            }}
           >
-            {/* The Photo */}
             <React.Suspense fallback={<mesh><planeGeometry args={[imgW, imgH]} /><meshBasicMaterial color="gray" /></mesh>}>
-                <PhotoMesh url={item.imgUrl} width={imgW} height={imgH} opacity={data.opacity} />
+                <PhotoMesh url={item.imgUrl} width={imgW} height={imgH} opacity={data.opacity} hovered={isHovered} />
             </React.Suspense>
-
-            {/* The Frame */}
             {data.frameConfig && (
                <FrameMesh data={data} width={imgW} height={imgH} />
             )}

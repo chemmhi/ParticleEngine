@@ -15,7 +15,8 @@
     "three": "^0.181.2",
     "uuid": "^13.0.0",
     "lucide-react": "^0.556.0",
-    "@react-three/fiber": "^9.4.2"
+    "@react-three/fiber": "^9.4.2",
+    "@mediapipe/tasks-vision": "0.10.9"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -157,6 +157,7 @@ const ImageParticleLayer: React.FC<Props> = ({ data, audioData, isPaused }) => {
     const time = state.clock.getElapsedTime();
 
     const bass = data.audioReactive ? audioData.bass : 0;
+    const mid = data.audioReactive ? audioData.mid : 0;
     const treble = data.audioReactive ? audioData.treble : 0;
     
     state.raycaster.setFromCamera(state.pointer, state.camera);
@@ -175,12 +176,22 @@ const ImageParticleLayer: React.FC<Props> = ({ data, audioData, isPaused }) => {
         const iy = initialPos[i3+1];
         const iz = initialPos[i3+2]; 
         
-        const depthMultiplier = 1 + (bass * 0.3); 
-        const noise = (Math.sin(ix * 10 + time) * Math.cos(iy * 10)) * treble * 0.02;
-        const wave = Math.sin(ix * 0.3 + time) * 0.1;
+        // --- Enhanced Audio Reactivity ---
+        // Bass affects scale/pulse (XY expansion)
+        const pulse = 1 + (bass * 0.15); 
+        
+        // Treble adds high frequency jitter
+        const jitter = (Math.random() - 0.5) * treble * 0.05; 
 
-        let px = ix;
-        let py = iy;
+        // Mid creates a wave effect
+        const wave = Math.sin(ix * 5 + time) * mid * 0.1;
+        
+        // Bass heavily affects depth (Z-extrusion)
+        const depthMultiplier = 1 + (bass * 0.5); 
+        const noise = (Math.sin(ix * 10 + time) * Math.cos(iy * 10)) * treble * 0.02;
+
+        let px = ix * pulse + jitter;
+        let py = iy * pulse + jitter;
         let pz = (iz * depthMultiplier) + wave + noise;
 
         tempVec.set(px, py, pz);
