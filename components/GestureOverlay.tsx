@@ -30,7 +30,7 @@ const GestureOverlay: React.FC<Props> = ({ onGesture, isInPreview }) => {
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number>(null);
+  const requestRef = useRef<number | null>(null);
   
   // --- TRACKING REFS ---
   const lastPalmPos = useRef<{x: number, y: number} | null>(null);
